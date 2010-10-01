@@ -20,17 +20,23 @@ main(int argc, char *argv[])
   PyRun_File(fh, script_source, Py_file_input, main_dict, main_dict);
   fclose(fh);
 
-  PyObject *processor= PyDict_GetItemString(main_dict, "process");
-  if (processor)
+  PyObject *processor_class= PyDict_GetItemString(main_dict, "Processor");
+  if (processor_class)
   {
-    PyObject *result= PyObject_CallFunction(processor, "s", sample_text);
-    if (result)
+    PyObject *processor_object= PyInstance_New(processor_class, NULL, NULL);
+    if (processor_object)
     {
-      const char *output= PyString_AsString(result);
-      printf("Result: '%s'\n", output);
-      Py_DECREF(result);
+      PyObject *result= PyObject_CallMethod(processor_object, "process", "s",
+                                            sample_text);
+      if (result)
+      {
+        const char *output= PyString_AsString(result);
+        printf("Result: '%s'\n", output);
+        Py_DECREF(result);
+      }
+      Py_DECREF(processor_object);
     }
-    Py_DECREF(processor);
+    Py_DECREF(processor_class);
   }
 
   Py_DECREF(main_dict);
