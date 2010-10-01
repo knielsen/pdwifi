@@ -21,13 +21,17 @@ main(int argc, char *argv[])
   fclose(fh);
 
   PyObject *processor= PyDict_GetItemString(main_dict, "process");
-  PyObject *result= PyObject_CallFunction(processor, "s", sample_text);
-  const char *output= PyString_AsString(result);
-  printf("Result: '%s'\n", output);
-  Py_DECREF(result);
-  Py_DECREF(processor);
-
-  PyRun_SimpleString("print 'Hello, World'");
+  if (processor)
+  {
+    PyObject *result= PyObject_CallFunction(processor, "s", sample_text);
+    if (result)
+    {
+      const char *output= PyString_AsString(result);
+      printf("Result: '%s'\n", output);
+      Py_DECREF(result);
+    }
+    Py_DECREF(processor);
+  }
 
   Py_DECREF(main_dict);
 
