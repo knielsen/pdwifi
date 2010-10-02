@@ -221,29 +221,41 @@ void Adapter::Xaction::start() {
 		receivingVb = opNever;
 	}
 
-        /* Initialise Python object to process content header/body. */
-        parent->reload_script(true);
-
-        processor_object= PyInstance_New(parent->processor_class, NULL, NULL);
-        if (!processor_object)
-          fprintf(stderr, "Error: failed to instantiate Python `Processor' object.\n");
-
 	/* adapt message header */
 
 	libecap::shared_ptr<libecap::Message> adapted = hostx->virgin().clone();
     Must(adapted != 0);
 
+    libecap::Header &h= adapted->header();
 	// delete ContentLength header because we may change the length
 	// unknown length may have performance implications for the host
-	adapted->header().removeAny(libecap::headerContentLength);
+	h.removeAny(libecap::headerContentLength);
+
+	static const libecap::Name ct_name("Content-Type");
+        std::string ct_str= "";
+        if (h.hasAny(ct_name))
+        {
+          const libecap::Header::Value ct= h.value(ct_name);
+          ct_str= ct.toString();
+        }
 
 #if 0
 	// add a custom header
 	static const libecap::Name name("X-Ecap");
 	const libecap::Header::Value value =
 		libecap::Area::FromTempString(libecap::MyHost().uri());
-	adapted->header().add(name, value);
+	h.add(name, value);
 #endif
+
+        /* Initialise Python object to process content header/body. */
+        parent->reload_script(true);
+        processor_object= PyInstance_New(parent->processor_class, NULL, NULL);
+        if (!processor_object)
+          fprintf(stderr, "Error: failed to instantiate Python `Processor' object.\n");
+        else
+          /* This is easier than learning how to pass it to the constructor ... */
+          PyObject_CallMethod(processor_object, const_cast<char *>("init"),
+                              const_cast<char *>("s"), ct_str.c_str());
 
 	if (!adapted->body()) {
 		sendingAb = opNever; // there is nothing to send
@@ -336,7 +348,9 @@ void Adapter::Xaction::adaptContent(std::string &chunk) const {
 
   if (processor_object)
   {
-    PyObject *result= PyObject_CallMethod(processor_object, "process", "s",
+    PyObject *result= PyObject_CallMethod(processor_object,
+                                          const_cast<char *>("process"),
+                                          const_cast<char *>("s"),
                                           chunk.c_str());
     if (result)
     {
