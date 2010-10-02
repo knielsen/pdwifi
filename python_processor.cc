@@ -13,6 +13,8 @@
 
 namespace Adapter { // not required, but adds clarity
 
+const char *script_source= "/home/knielsen/stuff.py";
+
 using libecap::size_type;
 
 class Service: public libecap::adapter::Service {
@@ -36,12 +38,20 @@ class Service: public libecap::adapter::Service {
 
 		// Work
 		virtual libecap::adapter::Xaction *makeXaction(libecap::host::Xaction *hostx);
+
+  Service()
+    : main_module(0), main_dict(0), processor_class(0)
+  { }
+
+  PyObject *main_module;
+  PyObject *main_dict;
+  PyObject *processor_class;
 };
 
 
 class Xaction: public libecap::adapter::Xaction {
 	public:
-		Xaction(libecap::host::Xaction *x);
+  Xaction(libecap::host::Xaction *x, Service *parentService);
 		virtual ~Xaction();
 
 		// lifecycle
@@ -77,6 +87,9 @@ class Xaction: public libecap::adapter::Xaction {
 		typedef enum { opUndecided, opOn, opComplete, opNever } OperationState;
 		OperationState receivingVb;
 		OperationState sendingAb;
+
+  Service *parent;
+  PyObject *processor_object;
 };
 
 } // namespace Adapter
@@ -104,7 +117,37 @@ void Adapter::Service::reconfigure(const Config &) {
 void Adapter::Service::start() {
   // Don't call the parent class, as it asserts.
   // libecap::adapter::Service::start();
-	// custom code would go here, but this service does not have one
+
+  Py_Initialize();
+
+  main_module= PyImport_AddModule("__main__");
+  if (!main_module)
+  {
+    fprintf(stderr, "Fatal: cannot obtain __main__ module\n");
+    exit(1);
+  }
+  main_dict= PyModule_GetDict(main_module);
+  if (!main_dict)
+  {
+    fprintf(stderr, "Fatal: cannot obtain __main__ dictionary\n");
+    exit(1);
+  }
+
+  FILE *fh = fopen(script_source, "r");
+  if (!fh)
+  {
+    fprintf(stderr, "Fatal: cannot open file '%s'.\n", script_source);
+    exit(1);
+  }
+  PyRun_File(fh, script_source, Py_file_input, main_dict, main_dict);
+  fclose(fh);
+
+  processor_class= PyDict_GetItemString(main_dict, "Processor");
+  if (!processor_class)
+  {
+    fprintf(stderr, "Fatal: cannot obtain `Processor' class\n");
+    exit(1);
+  }
 }
 
 void Adapter::Service::stop() {
@@ -115,6 +158,11 @@ void Adapter::Service::stop() {
 void Adapter::Service::retire() {
 	// custom code would go here, but this service does not have one
   // libecap::adapter::Service::stop();
+
+  Py_DECREF(processor_class);
+  Py_DECREF(main_dict);
+
+  Py_Finalize();
 }
 
 bool Adapter::Service::wantsUrl(const char *url) const {
@@ -122,12 +170,15 @@ bool Adapter::Service::wantsUrl(const char *url) const {
 }
 
 libecap::adapter::Xaction *Adapter::Service::makeXaction(libecap::host::Xaction *hostx) {
-	return new Adapter::Xaction(hostx);
+  return new Adapter::Xaction(hostx, this);
 }
 
 
-Adapter::Xaction::Xaction(libecap::host::Xaction *x): hostx(x),
-	receivingVb(opUndecided), sendingAb(opUndecided) {
+Adapter::Xaction::Xaction(libecap::host::Xaction *x, Adapter::Service *parentService):
+  hostx(x),
+  receivingVb(opUndecided), sendingAb(opUndecided), parent(parentService),
+  processor_object(0)
+{
 }
 
 Adapter::Xaction::~Xaction() {
@@ -145,6 +196,11 @@ void Adapter::Xaction::start() {
 	} else {
 		receivingVb = opNever;
 	}
+
+        /* Initialise Python object to process content header/body. */
+        processor_object= PyInstance_New(parent->processor_class, NULL, NULL);
+        if (!processor_object)
+          fprintf(stderr, "Error: failed to instantiate Python `Processor' object.\n");
 
 	/* adapt message header */
 
@@ -170,6 +226,7 @@ void Adapter::Xaction::start() {
 }
 
 void Adapter::Xaction::stop() {
+  Py_DECREF(processor_object);
 	hostx = 0;
     // the caller will delete
 }
@@ -247,12 +304,22 @@ void Adapter::Xaction::adaptContent(std::string &chunk) const {
 	// split by arbitrary chunk boundaries, efficiency, and other things
 
 	// another simplification: victim does not belong to replacement
-	static const std::string victim = "Kristian";
-	static const std::string replacement = "Christian";
 
-	std::string::size_type pos = 0;
-	while ((pos = chunk.find(victim, pos)) != std::string::npos)
-		chunk.replace(pos, victim.length(), replacement);
+
+  if (processor_object)
+  {
+    PyObject *result= PyObject_CallMethod(processor_object, "process", "s",
+                                          chunk.c_str());
+    if (result)
+    {
+      const char *output= PyString_AsString(result);
+      if (output)
+      {
+        chunk= output;
+      }
+      Py_DECREF(result);
+    }
+  }
 }
 
 bool Adapter::Xaction::callable() const {
