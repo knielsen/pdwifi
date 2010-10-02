@@ -4,6 +4,6 @@ set -e
 
 aclocal
 #autoheader
-#libtoolize --automake --force --copy
+libtoolize --automake --force --copy
 automake --add-missing --force --copy
 autoconf

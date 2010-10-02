@@ -14,3 +14,9 @@ missing
 .deps
 aclocal.m4
 autom4te.cache
+config.guess
+config.sub
+ecap_python_processor.la
+libtool
+ltmain.sh
+python_processor.loT
