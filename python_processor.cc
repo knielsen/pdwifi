@@ -1,3 +1,7 @@
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include "Python.h"
 
 #include <iostream>
@@ -40,12 +44,16 @@ class Service: public libecap::adapter::Service {
 		virtual libecap::adapter::Xaction *makeXaction(libecap::host::Xaction *hostx);
 
   Service()
-    : main_module(0), main_dict(0), processor_class(0)
+    : main_module(0), main_dict(0), processor_class(0), last_access((time_t)-1)
   { }
+
+  void reload_script(bool check_stat);
 
   PyObject *main_module;
   PyObject *main_dict;
   PyObject *processor_class;
+
+  time_t last_access;
 };
 
 
@@ -133,6 +141,22 @@ void Adapter::Service::start() {
     exit(1);
   }
 
+  reload_script(false);
+}
+
+void
+Adapter::Service::reload_script(bool check_stat)
+{
+  struct stat buf;
+  if (stat(script_source, &buf))
+  {
+    fprintf(stderr, "Failed to stat(\"%s\"): %d\n", script_source, errno);
+    return;
+  }
+  if (check_stat && buf.st_mtime == last_access)
+      return;
+  last_access= buf.st_mtime;
+
   FILE *fh = fopen(script_source, "r");
   if (!fh)
   {
@@ -198,6 +222,8 @@ void Adapter::Xaction::start() {
 	}
 
         /* Initialise Python object to process content header/body. */
+        parent->reload_script(true);
+
         processor_object= PyInstance_New(parent->processor_class, NULL, NULL);
         if (!processor_object)
           fprintf(stderr, "Error: failed to instantiate Python `Processor' object.\n");
@@ -211,11 +237,13 @@ void Adapter::Xaction::start() {
 	// unknown length may have performance implications for the host
 	adapted->header().removeAny(libecap::headerContentLength);
 
+#if 0
 	// add a custom header
 	static const libecap::Name name("X-Ecap");
 	const libecap::Header::Value value =
 		libecap::Area::FromTempString(libecap::MyHost().uri());
 	adapted->header().add(name, value);
+#endif
 
 	if (!adapted->body()) {
 		sendingAb = opNever; // there is nothing to send
