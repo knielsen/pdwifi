@@ -343,6 +343,7 @@ void Adapter::Xaction::noteVbContentAvailable()
 
 	const libecap::Area vb = hostx->vbContent(0, libecap::nsize); // get all vb
 	std::string chunk = vb.toString(); // expensive, but simple
+        hostx->vbContentShift(vb.size);
 	adaptContent(chunk);
 	buffer += chunk; // buffer what we got
 
