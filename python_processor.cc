@@ -98,6 +98,7 @@ class Xaction: public libecap::adapter::Xaction {
 
   Service *parent;
   PyObject *processor_object;
+  bool do_process;
 };
 
 } // namespace Adapter
@@ -201,7 +202,7 @@ libecap::adapter::Xaction *Adapter::Service::makeXaction(libecap::host::Xaction 
 Adapter::Xaction::Xaction(libecap::host::Xaction *x, Adapter::Service *parentService):
   hostx(x),
   receivingVb(opUndecided), sendingAb(opUndecided), parent(parentService),
-  processor_object(0)
+  processor_object(0), do_process(false)
 {
 }
 
@@ -249,13 +250,23 @@ void Adapter::Xaction::start() {
 
         /* Initialise Python object to process content header/body. */
         parent->reload_script(true);
+        do_process= false;
         processor_object= PyInstance_New(parent->processor_class, NULL, NULL);
         if (!processor_object)
           fprintf(stderr, "Error: failed to instantiate Python `Processor' object.\n");
         else
-          /* This is easier than learning how to pass it to the constructor ... */
-          PyObject_CallMethod(processor_object, const_cast<char *>("init"),
-                              const_cast<char *>("s"), ct_str.c_str());
+        {
+          PyObject *result= PyObject_CallMethod(processor_object,
+                                                const_cast<char *>("init"),
+                                                const_cast<char *>("s"),
+                                                ct_str.c_str());
+          if (result)
+          {
+            if (PyInt_AsLong(result))
+              do_process= true;
+            Py_DECREF(result);
+          }
+        }
 
 	if (!adapted->body()) {
 		sendingAb = opNever; // there is nothing to send
@@ -346,7 +357,7 @@ void Adapter::Xaction::adaptContent(std::string &chunk) const {
 	// another simplification: victim does not belong to replacement
 
 
-  if (processor_object)
+  if (do_process && processor_object)
   {
     PyObject *result= PyObject_CallMethod(processor_object,
                                           const_cast<char *>("process"),

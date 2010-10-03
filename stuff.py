@@ -10,6 +10,10 @@ class Processor:
             self.mangle= True
         else:
             self.mangle= False
+        if self.mangle:
+            return 1
+        else:
+            return 0
 
     def process(self, s):
         if self.mangle:
