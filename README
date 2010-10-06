@@ -1,0 +1,19 @@
+sudo brctl addbr br0
+sudo brctl stp br0 off
+sudo brctl setfd br0 0
+sudo ifconfig br0 10.10.0.1 netmask 255.255.255.0 up
+
+sudo sh -c 'echo 1 > /proc/sys/net/ipv4/ip_forward'
+
+sudo kvm -m 512 -hda lucid-amd64-desktop.qcow2 -boot c -cpu qemu64 -net nic,model=virtio -net tap,ifname=tap0,script=no -usbdevice tablet -std-vga
+sudo ifconfig tap0 0.0.0.0
+sudo brctl addif br0 tap0
+
+sudo iptables -t nat -A PREROUTING -s 10.42.3.168 -p tcp --dport 80 -j ACCEPT
+sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3128
+sudo /sbin/iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE
+sudo /sbin/iptables -A FORWARD -i wlan0 -o br0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+sudo /sbin/iptables -A FORWARD -i br0 -o wlan0 -j ACCEPT
+
+sudo /etc/init.d/dhcp3-server start
+~/devel/proxy/sbin/squid
